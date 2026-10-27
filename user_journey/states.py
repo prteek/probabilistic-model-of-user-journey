@@ -7,7 +7,8 @@ from whether the user was active that day and how many days earlier they were la
 - current / reactivated / resurrected: active, last active at most 6 / 7 to 30 / more than 30 days earlier
 - at_risk_wau / at_risk_mau / dormant: inactive, last active at most 6 / 7 to 30 / more than 30 days earlier
 
-Run `python -m user_journey.states` to write states.parquet (published as the `states` config of the dataset).
+Run `python -m user_journey.states` to write the table to states.parquet (not in git, and not published: it takes
+seconds to rebuild).
 """
 from pathlib import Path
 

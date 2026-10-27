@@ -10,12 +10,10 @@ tags:
   - markov-chain
   - tabular
 size_categories:
-  - 10M<n<100M
+  - 100K<n<1M
 configs:
   - config_name: default
     data_files: dau_data.csv
-  - config_name: states
-    data_files: states.parquet
 ---
 
 # Simulated daily active users of an app
@@ -31,14 +29,7 @@ at-risk monthly active, dormant) following Duolingo's growth model, estimates a 
 them, and forecasts daily, weekly and monthly active users.
 Code: [github.com/prteek/probabilistic-model-of-user-journey](https://github.com/prteek/probabilistic-model-of-user-journey).
 
-Two subsets:
-
-- **`default`** (`dau_data.csv`): the activity records.
-- **`states`** (`states.parquet`, 32,111,109 rows, 225 MB): every user on every day from 1 October 2020 to
-  31 October 2023 with their state, as built from the activity records by `user_journey/states.py` in the code
-  repository (a DuckDB query; `python -m user_journey.states`). It is shared here ready-made for convenience.
-
-## `default`: activity records
+## Activity records (`dau_data.csv`)
 
 | column | content |
 |---|---|
@@ -48,7 +39,17 @@ Two subsets:
 
 Days without a row for a user are days on which the user was inactive.
 
-## `states`: one state per user per day
+## User states, derived
+
+The states used in the blog post (one row per user per day, 32,111,109 rows) are not stored here: a single DuckDB
+query builds them from the activity records in a few seconds. It is `user_journey/states.py` in the code repository:
+
+```python
+import duckdb
+from user_journey.states import states
+
+states(duckdb.connect(), "dau_data.csv").write_parquet("states.parquet")
+```
 
 | column | content |
 |---|---|
@@ -67,8 +68,3 @@ Days without a row for a user are days on which the user was inactive.
 | `at_risk_wau` | not active today, active in the past week | 604,449 |
 | `at_risk_mau` | active in the past month but not the past week | 1,683,057 |
 | `dormant` | inactive for at least 30 days | 29,156,367 |
-
-```python
-import pandas as pd
-states = pd.read_parquet("hf://datasets/prteek/user-journey-dau/states.parquet")
-```

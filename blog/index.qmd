@@ -69,7 +69,7 @@ How many people will use your app next month? Duolingo [described](https://blog.
 
 The appeal is that the model has handles a product team can reason about. A reminder campaign that brings back some *at-risk* users changes one number in a transition matrix; a marketing push changes the expected number of new users. Everything is open:
 
-- 📊 **Data:** [datasets/prteek/user-journey-dau](https://huggingface.co/datasets/prteek/user-journey-dau): the activity records and the derived table of user states
+- 📊 **Data:** [datasets/prteek/user-journey-dau](https://huggingface.co/datasets/prteek/user-journey-dau): the activity records
 - 💻 **Code:** [github.com/prteek/probabilistic-model-of-user-journey](https://github.com/prteek/probabilistic-model-of-user-journey)
 
 ```{python}
@@ -260,7 +260,7 @@ Most daily actives are *current* users (`{python} num(state0['current'])` of the
 
 ## Reproduce it
 
-The [dataset](https://huggingface.co/datasets/prteek/user-journey-dau) has the activity records (`dau_data.csv`) and the states table built from them. The code above lives in the `user_journey` package in the [repository](https://github.com/prteek/probabilistic-model-of-user-journey):
+The [dataset](https://huggingface.co/datasets/prteek/user-journey-dau) has the activity records (`dau_data.csv`); the states are rebuilt from them in seconds. The code above lives in the `user_journey` package in the [repository](https://github.com/prteek/probabilistic-model-of-user-journey):
 
 ```python
 import duckdb
