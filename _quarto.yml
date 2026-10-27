@@ -1,0 +1,42 @@
+# `quarto render` writes _output/probabilistic-model-of-user-journey.pdf for alphaXiv. R comes from renv
+# (renv.lock); render with Homebrew R 4.6: QUARTO_R=/opt/homebrew/bin/Rscript.
+project:
+  type: default
+  output-dir: _output
+  render:
+    - index.qmd
+
+# Executed results are frozen in _freeze/ (tracked): re-running needs states.csv (2.5 GB, built from
+# dau_data.csv by prepare_states.r), so rendering reuses the frozen results until the code changes.
+execute:
+  freeze: auto
+
+format:
+  pdf:
+    output-file: probabilistic-model-of-user-journey
+    papersize: a4
+    fontsize: 11pt
+    geometry:
+      - margin=2.5cm
+    number-sections: true
+    colorlinks: true
+    reference-section-title: References
+    fig-pos: "htbp"
+    fig-format: png
+    fig-dpi: 300
+    code-block-bg: "#f6f6f6"
+    monofont: Menlo  # covers Greek and symbols printed in code output
+    monofontoptions:
+      - Scale=0.82
+    filters:
+      - _wide-tables.lua
+    include-in-header:
+      text: |
+        \usepackage{adjustbox}
+        % wrap long lines in code and console output instead of running past the margin
+        \usepackage{fvextra}
+        \AtBeginDocument{%
+          \DefineVerbatimEnvironment{Highlighting}{Verbatim}{breaklines,breakanywhere,commandchars=\\\{\}}%
+          \RecustomVerbatimEnvironment{verbatim}{Verbatim}{breaklines,breakanywhere}}
+        % fit wide tables to the page
+        \AtBeginEnvironment{longtable}{\footnotesize\setlength{\tabcolsep}{3pt}}

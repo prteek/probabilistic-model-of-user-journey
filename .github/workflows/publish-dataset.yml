@@ -1,0 +1,29 @@
+name: Publish dataset
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - dau_data.csv
+      - huggingface/**
+      - .github/workflows/publish-dataset.yml
+  workflow_dispatch:
+
+concurrency:
+  group: publish-dataset
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    env:
+      HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      HF_CLI: hf
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install huggingface_hub==2.3.0
+      - name: Upload dau_data.csv and the dataset card
+        run: huggingface/publish.sh "Deploy ${GITHUB_SHA::7} from GitHub"
