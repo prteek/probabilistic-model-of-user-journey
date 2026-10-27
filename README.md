@@ -1,42 +1,47 @@
 # probabilistic-model-of-user-journey
 
 Forecasting an app's daily, weekly and monthly active users with a Markov chain over user states (new, current,
-reactivated, resurrected, at risk, dormant), following Duolingo's growth model, and exploring how campaigns that move
-at-risk users back to active change the forecast. Written up as the paper
-[Probabilistic Model of User Journey](https://www.alphaxiv.org/abs/2610.probabilistic-model-of-user-journey) on
-alphaXiv.
+reactivated, resurrected, at risk, dormant), following Duolingo's growth model. Written up as the blog post
+[Forecasting Daily Active Users with a Markov Chain](https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey) on Hugging Face.
 
-**Data:** https://huggingface.co/datasets/prteek/user-journey-dau
+**Blog:** https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey · **Data:** https://huggingface.co/datasets/prteek/user-journey-dau
 
 ```
-index.qmd            the paper (R, knitr)
-_quarto.yml          PDF format; renders to _output/probabilistic-model-of-user-journey.pdf
-_freeze/             frozen results of the paper's code (tracked)
-dau_data.csv         simulated daily activity of 51,480 users (published as the dataset)
-prepare_states.r     expands dau_data.csv into one state per user per day: states.csv (~2.5 GB, not in git)
-helpers.r            functions used by the paper
-huggingface/         dataset card and publish.sh
-renv.lock, renv/     R package versions (renv)
-references.bib, states.png, count_estimation.png, _wide-tables.lua
+user_journey/          shared package
+  states.py            one state per user per day from dau_data.csv (DuckDB); python -m user_journey.states
+  model.py             transition matrix, new-user count model (negative binomial), DAU / WAU / MAU forecast
+dau_data.csv           simulated daily activity of 51,480 users (published as the dataset)
+blog/                  Quarto write-up -> markdown for the Hugging Face article editor
+  index.qmd            the blog post; renders to probabilistic-model-of-user-journey.md, figures to assets/
+  _hf-markdown.lua     writes inline maths as \\( ... \\) for the article editor
+  states.png           the state diagram (hand-drawn); thumbnail.png, the article's cover image
+dataset/README.md      the dataset card
+publish.sh             upload the activity records and the card, or the states table
+tests/                 the state rules, transition matrix and forecast
 ```
 
 ## Common tasks
 
 ```bash
-Rscript -e 'renv::restore()'                       # once: install the R packages
-QUARTO_R=/opt/homebrew/bin/Rscript quarto render   # paper PDF from the frozen results
-huggingface/publish.sh "message"                   # publish dau_data.csv and the card (CI does this on push)
+uv sync                                                      # package + blog + dev groups
+uv run pytest -q
+
+QUARTO_PYTHON=.venv/bin/python quarto render blog/index.qmd  # blog markdown + assets/ figures (~25 s)
+uv run python -m user_journey.states                         # states.parquet (32 million rows, seconds)
+./publish.sh "message" states                                # publish states.parquet (by hand)
 ```
 
-Re-running the paper's code needs `states.csv`, one state per user per day (~2.5 GB). Rather than building it with
-`Rscript prepare_states.r`, download the ready-made table from the dataset and convert it:
+The post builds the states from `dau_data.csv` on every render, so it needs nothing beyond this repository.
 
-```bash
-hf download prteek/user-journey-dau states.parquet --repo-type dataset --local-dir .
-duckdb -c "COPY (FROM 'states.parquet') TO 'states.csv'"
-```
+## Notes
 
-After changing `prepare_states.r`, rebuild `states.csv` and publish it with `huggingface/publish.sh "message" states`.
+- **The write-up is a blog post in Python.** It replaced the alphaXiv paper (R, PDF build, frozen results) on
+  2026-10-27. The Python port reproduces the R results: the DuckDB states query gives exactly the 32,111,109 rows of
+  the published `states.parquet` (built by the old `prepare_states.r`), the transition matrix matches the paper to
+  7 decimal places, and the negative binomial new-user model gives the same fit (theta 9.31) and predictions as
+  `MASS::glm.nb`; its 95% intervals are about 1% wider, since statsmodels estimates the dispersion jointly.
+- **The new-user forecast is the weak link.** The `year * bs(week_of_year)` interaction extrapolates the seasonal
+  shape into 2024, so the January spike becomes a broad hump; the post says so and treats the forecast as a scenario.
 
-Rendering reuses `_freeze/` until a code chunk changes. A push to `main` that changes `dau_data.csv` or the card
-publishes the dataset (`.github/workflows/publish-dataset.yml`, using the `HF_TOKEN` repository secret).
+A push to `main` that changes `dau_data.csv`, the card or `publish.sh` publishes the dataset
+(`.github/workflows/publish-dataset.yml`, using the `HF_TOKEN` repository secret).

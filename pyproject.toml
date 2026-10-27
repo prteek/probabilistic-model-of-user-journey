@@ -1,0 +1,35 @@
+[project]
+name = "probabilistic-model-of-user-journey"
+version = "0.1.0"
+description = "Forecasting daily, weekly and monthly active users with a Markov chain over user states: blog post and dataset"
+requires-python = ">=3.12"
+# the shared package (user_journey): user states, transition matrix, new-user model and forecast
+dependencies = [
+    "duckdb>=1.1",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "statsmodels>=0.14",
+]
+
+[dependency-groups]
+# rendering the Quarto blog post (blog/)
+blog = [
+    "jupyter>=1.1",
+    "matplotlib>=3.9",
+    "pyyaml>=6.0",
+    "tabulate>=0.9",
+]
+dev = ["pytest>=8"]
+
+[tool.uv]
+default-groups = ["blog", "dev"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["user_journey"]

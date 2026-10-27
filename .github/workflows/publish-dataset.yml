@@ -5,7 +5,8 @@ on:
     branches: [main]
     paths:
       - dau_data.csv
-      - huggingface/**
+      - dataset/**
+      - publish.sh
       - .github/workflows/publish-dataset.yml
   workflow_dispatch:
 
@@ -26,4 +27,4 @@ jobs:
           python-version: "3.12"
       - run: pip install huggingface_hub==2.3.0
       - name: Upload dau_data.csv and the dataset card
-        run: huggingface/publish.sh "Deploy ${GITHUB_SHA::7} from GitHub"
+        run: ./publish.sh "Deploy ${GITHUB_SHA::7} from GitHub"

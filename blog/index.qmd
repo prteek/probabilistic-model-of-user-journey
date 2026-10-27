@@ -1,0 +1,277 @@
+---
+# The blog post: `QUARTO_PYTHON=.venv/bin/python quarto render blog/index.qmd` (from the repo root) writes
+# probabilistic-model-of-user-journey.md next to this file, ready to paste into the Hugging Face article editor, with
+# its figures in assets/ (upload each in the editor, which replaces its local link). Code cells import user_journey.
+format:
+  gfm:
+    output-file: probabilistic-model-of-user-journey
+    wrap: preserve
+filters:
+  - _hf-markdown.lua  # inline maths as \\( ... \\)
+execute:
+  echo: false
+  warning: false
+  engine: jupyter
+---
+
+```{python}
+import shutil
+from pathlib import Path
+
+import duckdb
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
+from IPython.display import Markdown, display
+
+from user_journey.model import STATE_NAMES, fit_new_users, forecast, predict_new_users, transition_matrix
+from user_journey.states import DAU_DATA, states
+
+plt.style.use("seaborn-v0_8-whitegrid")
+
+# figures are saved next to the post; the article editor swaps each for its own link when it is uploaded
+ASSETS = Path("assets")
+ASSETS.mkdir(exist_ok=True)
+shutil.copy("states.png", ASSETS / "states.png")  # the hand-drawn state diagram
+
+
+def figure(fig, name, alt):
+    fig.savefig(ASSETS / f"{name}.png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    display(Markdown(f"![{alt}]({ASSETS}/{name}.png)"))
+
+
+def num(x, digits=0):
+    return f"{x:,.{digits}f}"
+
+
+dau_data = pd.read_csv(DAU_DATA, parse_dates=["date", "registration_date"])
+daily_active = dau_data.groupby("date").size().rename("dau")
+daily_new = (
+    dau_data[dau_data["date"] == dau_data["registration_date"]]
+    .groupby("date").size().rename("new_user_count").reset_index()
+)
+
+con = duckdb.connect()
+con.execute("SET enable_progress_bar = false")  # keep DuckDB's progress bars out of the post
+user_states = states(con)
+
+# the transition matrix is estimated on the last year of data; the forecast runs on from the day after
+TRAIN_START, TRAIN_END = "2022-11-01", "2023-10-31"
+FORECAST_START, FORECAST_END = "2023-11-01", "2024-12-01"
+```
+
+# Forecasting Daily Active Users with a Markov Chain
+
+## A Duolingo-Style Model of User States, from Activity Logs to a DAU Forecast
+
+How many people will use your app next month? Duolingo [described](https://blog.duolingo.com/growth-model-duolingo) how they answer that: every user is in one of a handful of states each day (new, current, at risk, dormant, ...), users move between states with stable probabilities, and daily, weekly and monthly active users are just sums over states. This post applies that model to the activity logs of a simulated app and uses it to forecast a year ahead.
+
+The appeal is that the model has handles a product team can reason about. A reminder campaign that brings back some *at-risk* users changes one number in a transition matrix; a marketing push changes the expected number of new users. Everything is open:
+
+- 📊 **Data:** [datasets/prteek/user-journey-dau](https://huggingface.co/datasets/prteek/user-journey-dau): the activity records and the derived table of user states
+- 💻 **Code:** [github.com/prteek/probabilistic-model-of-user-journey](https://github.com/prteek/probabilistic-model-of-user-journey)
+
+```{python}
+m = transition_matrix(user_states, TRAIN_START, TRAIN_END)
+fit = fit_new_users(daily_new)
+new_users_ahead = predict_new_users(fit, pd.date_range(FORECAST_START, FORECAST_END))
+state0 = (
+    user_states.filter(f"date = DATE '{TRAIN_END}'")
+    .aggregate("state, count(*) as n").df()
+    .set_index("state")["n"]
+)
+ahead = forecast(m, state0, new_users_ahead)
+ahead_fewer_new = forecast(m, state0, new_users_ahead.assign(predicted=lambda d: 0.8 * d["predicted"]))
+last_year = daily_active.loc["2022-11-01":"2023-10-31"]
+```
+
+## TL;DR
+
+- Give every user one of **seven states** each day, estimate the **transition matrix** between states from a year of history, and push today's state counts through it day by day, adding the expected new users.
+- In this app, `{python} f"{m.loc['current', 'current']:.0%}"` of today's current users are active again tomorrow, and a dormant user has only a `{python} f"{m.loc['dormant', 'resurrected']:.2%}"` chance of coming back on a given day.
+- The forecast is driven mostly by new users. With the new-user model as fitted, DAU over the next year averages `{python} num(ahead['dau'].mean())`, against `{python} num(last_year.mean())` in the last year of data; with 20% fewer new users it averages `{python} num(ahead_fewer_new['dau'].mean())`.
+
+## User states
+
+On each day of a user's life, they are in exactly one of seven states:
+
+- **new**: using the app for the first time
+- **current**: active today, and also active in the past week
+- **reactivated**: active today, last active in the past month but not the past week
+- **resurrected**: active today, last active more than 30 days ago
+- **at_risk_wau**: not active today, but active in the past week
+- **at_risk_mau**: active in the past month, but not the past week
+- **dormant**: inactive for more than 30 days
+
+![User states and the transitions between them](assets/states.png)
+
+The arrows are the quantities a product team watches: the share of new users who come back the next day, the share of current users who stay current, the share of at-risk users who return, and so on.
+
+## The model
+
+Let $M$ be the transition matrix: $m_{ij}$ is the probability that a user in state $i$ today is in state $j$ tomorrow, and each row sums to 1. If $u_t$ holds the number of users in each state on day $t$, then, assuming the transition probabilities don't change over time,
+
+$$
+u_{t+1} = M^\top u_t ,
+$$
+
+except that the number of new users on each day comes from outside the chain and has to be forecast separately. Daily, weekly and monthly active users are then sums over states:
+
+$$
+\begin{aligned}
+\text{DAU}_t &= \#\text{new}_t + \#\text{current}_t + \#\text{reactivated}_t + \#\text{resurrected}_t \\
+\text{WAU}_t &= \text{DAU}_t + \#\text{at\_risk\_wau}_t \\
+\text{MAU}_t &= \text{WAU}_t + \#\text{at\_risk\_mau}_t
+\end{aligned}
+$$
+
+So the recipe is: forecast new users per day, assign a state to every user on every day of history, estimate $M$, take the state counts on the last day of data, and iterate.
+
+## The data
+
+The data is a simulated activity log based on a real SaaS app: one row per user per day they were active, with the user's registration date.
+
+```{python}
+display(Markdown(dau_data.head(5).assign(
+    date=lambda d: d["date"].dt.date, registration_date=lambda d: d["registration_date"].dt.date
+).to_markdown(index=False)))
+```
+
+It covers `{python} num(dau_data['user_id'].nunique())` users from `{python} f"{dau_data['date'].min():%-d %B %Y}"` to `{python} f"{dau_data['date'].max():%-d %B %Y}"`, `{python} num(len(dau_data))` active user-days in all. Daily active users grow through 2021 and then hover with a strong seasonal pattern:
+
+```{python}
+fig, ax = plt.subplots(figsize=(10, 3.6))
+ax.plot(daily_active.index, daily_active.values, color="black", lw=0.8)
+ax.set_ylabel("daily active users")
+figure(fig, "dau", "Daily active users in the data")
+```
+
+## Forecasting new users
+
+New users enter the chain from outside, so they need their own forecast. It doesn't need to be very accurate: in practice the number of new users is also something a team plans for, so it is as much an input as a prediction.
+
+Daily new-user counts are modelled with a **negative binomial regression**: counts are overdispersed relative to a Poisson (there are spikes, especially at the start of each year), and the negative binomial allows for that. The predictors are the year, a spline in the week of the year (interacting with the year, so the seasonal shape can change), the month and the day of the week:
+
+```python
+smf.negativebinomial(
+    "new_user_count ~ year * bs(week_of_year, df=4) + C(month) + day_of_week", data
+).fit(method="newton")
+```
+
+```{python}
+fitted = predict_new_users(fit, daily_new["date"])
+fig, axes = plt.subplots(1, 2, figsize=(12, 3.8), gridspec_kw={"width_ratios": [2, 1]})
+for ax, start in zip(axes, ["2020-10-01", "2023-07-01"]):
+    end = FORECAST_END if start < "2023" else "2023-12-31"
+    obs = daily_new[daily_new["date"] >= start]
+    fit_part = fitted[fitted["date"] >= start]
+    ahead_part = new_users_ahead[new_users_ahead["date"] <= end]
+    ax.scatter(obs["date"], obs["new_user_count"], s=3, color="0.4", alpha=0.6, label="new users")
+    ax.plot(fit_part["date"], fit_part["predicted"], color="tab:brown", lw=1, label="fitted")
+    ax.plot(ahead_part["date"], ahead_part["predicted"], color="tab:red", lw=1, label="forecast")
+    if start > "2023":
+        for part in (fit_part, ahead_part):
+            ax.fill_between(part["date"], part["lower"], part["upper"], color="black", alpha=0.15, lw=0)
+    ax.tick_params(axis="x", labelrotation=30)
+axes[0].set_ylabel("new users per day")
+axes[0].legend(fontsize=8, loc="upper left")
+axes[1].set_title("Last months of data and the start of the forecast, with 95% intervals", fontsize=9)
+figure(fig, "new-users", "Daily new users: data, fitted values and forecast")
+```
+
+The model fits the history well, including the spike in new users at the start of each year. The forecast is less convincing: with the seasonal shape allowed to change from year to year, the model carries that trend into 2024, so new users start climbing in November and the January spike becomes a broad hump, followed by a summer lower than anything in the data. That is a reason to treat the new-user forecast as a scenario rather than a prediction.
+
+## From activity records to states
+
+The activity log only lists days when a user was active. To assign states, every user needs a row for **every** day from their first active day to the end of the data, marked active or not; each day's state then follows from whether the user was active and how long ago they were last active. That is `{python} num(user_states.count('*').fetchall()[0][0])` user-days, which DuckDB builds from the activity log in a few seconds with a window function:
+
+```sql
+max(case when is_active then date end) over (
+    partition by user_id order by date rows between unbounded preceding and 1 preceding
+) as last_active
+```
+
+Here is one user over two weeks, going quiet, slipping from *current* to *at risk*, and coming back:
+
+```{python}
+example = (
+    user_states.filter("user_id like '269b7f13-a509-5174-85cb%' and date between '2020-10-18' and '2020-10-30'")
+    .order("date").df()
+    .assign(
+        user_id=lambda d: d["user_id"].str[:8] + "…",
+        date=lambda d: d["date"].dt.date,
+        registration_date=lambda d: d["registration_date"].dt.date,
+    )
+)
+display(Markdown(example.to_markdown(index=False)))
+```
+
+## The transition matrix
+
+The transition matrix is estimated by counting, over the last year of data, how often users move from each state to each other state from one day to the next, and dividing by the number of moves out of each state:
+
+```sql
+select state as state_from, lead(state) over (partition by user_id order by date) as state_to
+from states
+```
+
+```{python}
+display(Markdown(m.rename_axis("today ↓ / tomorrow →").to_markdown(floatfmt=".4f")))
+```
+
+It reads sensibly:
+
+- **Current users mostly stay current.** `{python} f"{m.loc['current', 'current']:.1%}"` are active again the next day; the rest become *at risk*.
+- **New users are fragile.** Only `{python} f"{m.loc['new', 'current']:.1%}"` are active on their second day.
+- **Nobody becomes new.** The *new* column is all zeros: new users only enter from outside the chain.
+- **Dormant users rarely return.** `{python} f"{m.loc['dormant', 'dormant']:.2%}"` of dormant users are still dormant the next day. On the last day of data, `{python} num(state0['dormant'])` of the `{python} num(state0.sum())` users are dormant, so even a small improvement there would be worth a resurrection campaign.
+
+## Forecasting DAU
+
+Starting from the state counts on `{python} f"{pd.Timestamp(TRAIN_END):%-d %B %Y}"`, each day of the forecast moves yesterday's counts through $M$ and adds that day's forecast new users:
+
+```python
+for _, day in new_users.iterrows():
+    u = np.floor(m.to_numpy().T @ u)
+    u[STATE_NAMES.index("new")] = np.floor(day["predicted"])
+```
+
+```{python}
+fig, ax = plt.subplots(figsize=(10, 3.8))
+ax.plot(daily_active.index, daily_active.values, color="black", lw=0.8, label="data")
+ax.plot(ahead["date"], ahead["dau"], color="tab:red", lw=1.2, label="forecast")
+ax.plot(ahead_fewer_new["date"], ahead_fewer_new["dau"], color="tab:red", lw=1.2, ls=":",
+        label="forecast with 20% fewer new users")
+ax.set_ylabel("daily active users")
+ax.legend(fontsize=8, loc="upper left")
+figure(fig, "dau-forecast", "Daily active users: data and forecast")
+```
+
+Most daily actives are *current* users (`{python} num(state0['current'])` of the `{python} num(state0[['new', 'current', 'reactivated', 'resurrected']].sum())` active on the last day of data), topped up every day by new users, so the forecast follows the new-user forecast closely. It peaks at `{python} num(ahead['dau'].max())` in January 2024, above anything in the data (`{python} num(daily_active.max())` at most), and falls to `{python} num(ahead['dau'].min())` in the summer. With 20% fewer new users (dotted line), the January peak (`{python} num(ahead_fewer_new['dau'].max())`) is in line with previous years, but the summer drops even lower. Either way, the shape and level of the forecast come from that one input.
+
+## Lessons learned
+
+- **States make retention concrete.** A transition matrix turns vague questions ("are we keeping users?") into specific rates a team can measure and target: next-day retention of new users, of current users, of users at risk.
+- **New users drive the forecast.** The chain itself is stable; the shape and the level of the forecast come almost entirely from the new-user forecast. Treat it as a planning input and look at scenarios rather than a single prediction.
+- **Campaigns are edits to the matrix.** A reminder that brings back some *at-risk* users raises the at-risk → current probability; a resurrection campaign raises dormant → resurrected. Re-running the forecast with the edited matrix shows the effect on DAU.
+- **Stationarity is an assumption.** The matrix is estimated on one year and held fixed for the next. Re-estimating it on rolling windows shows whether user behaviour, or the product, is changing.
+- **Let the database do the expansion.** Turning activity logs into one row per user per day is the expensive step. A window function in DuckDB does it in seconds, where row-by-row code in memory struggles.
+
+## Reproduce it
+
+The [dataset](https://huggingface.co/datasets/prteek/user-journey-dau) has the activity records (`dau_data.csv`) and the states table built from them. The code above lives in the `user_journey` package in the [repository](https://github.com/prteek/probabilistic-model-of-user-journey):
+
+```python
+import duckdb
+from user_journey.model import transition_matrix
+from user_journey.states import states
+
+m = transition_matrix(states(duckdb.connect()), "2022-11-01", "2023-10-31")
+```
+
+## References
+
+- Gustafson, E. (2024). *Meaningful metrics: How data sharpened the focus of product teams*. Duolingo blog. <https://blog.duolingo.com/growth-model-duolingo>
+- Seabold, S. & Perktold, J. (2010). statsmodels: Econometric and statistical modeling with Python. *Proceedings of the 9th Python in Science Conference*.
+- Raasveldt, M. & Mühleisen, H. (2019). DuckDB: an Embeddable Analytical Database. *SIGMOD*.

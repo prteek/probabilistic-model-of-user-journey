@@ -24,9 +24,9 @@ configs:
 Each row is one day on which one user was active. The data is **simulated**, based on historical activity data of a
 SaaS app; it contains no real users.
 
-It is the data behind the paper
-[Probabilistic Model of User Journey](https://www.alphaxiv.org/abs/2610.probabilistic-model-of-user-journey) on
-alphaXiv, which places users in seven states each day (new, current, reactivated, resurrected, at-risk weekly active,
+It is the data behind the blog post
+[Forecasting Daily Active Users with a Markov Chain](https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey) on
+Hugging Face, which places users in seven states each day (new, current, reactivated, resurrected, at-risk weekly active,
 at-risk monthly active, dormant) following Duolingo's growth model, estimates a Markov chain of transitions between
 them, and forecasts daily, weekly and monthly active users.
 Code: [github.com/prteek/probabilistic-model-of-user-journey](https://github.com/prteek/probabilistic-model-of-user-journey).
@@ -35,8 +35,8 @@ Two subsets:
 
 - **`default`** (`dau_data.csv`): the activity records.
 - **`states`** (`states.parquet`, 32,111,109 rows, 225 MB): every user on every day from 1 October 2020 to
-  31 October 2023 with their state, as built from the activity records by `prepare_states.r` in the code repository.
-  Building it takes a while and about 2.5 GB as CSV, so it is shared here ready-made.
+  31 October 2023 with their state, as built from the activity records by `user_journey/states.py` in the code
+  repository (a DuckDB query; `python -m user_journey.states`). It is shared here ready-made for convenience.
 
 ## `default`: activity records
 
