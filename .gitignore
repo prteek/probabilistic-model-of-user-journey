@@ -6,3 +6,4 @@ _output/
 .Rhistory
 .DS_Store
 states.csv
+states.parquet

@@ -10,10 +10,12 @@ tags:
   - markov-chain
   - tabular
 size_categories:
-  - 100K<n<1M
+  - 10M<n<100M
 configs:
   - config_name: default
     data_files: dau_data.csv
+  - config_name: states
+    data_files: states.parquet
 ---
 
 # Simulated daily active users of an app
@@ -25,10 +27,18 @@ SaaS app; it contains no real users.
 It is the data behind the paper
 [Probabilistic Model of User Journey](https://www.alphaxiv.org/abs/2610.probabilistic-model-of-user-journey) on
 alphaXiv, which places users in seven states each day (new, current, reactivated, resurrected, at-risk weekly active,
-at-risk monthly active, dormant) following Duolingo's growth model, estimates a Markov chain of transitions between them, and forecasts daily, weekly and
-monthly active users. Code: [github.com/prteek/probabilistic-model-of-user-journey](https://github.com/prteek/probabilistic-model-of-user-journey).
+at-risk monthly active, dormant) following Duolingo's growth model, estimates a Markov chain of transitions between
+them, and forecasts daily, weekly and monthly active users.
+Code: [github.com/prteek/probabilistic-model-of-user-journey](https://github.com/prteek/probabilistic-model-of-user-journey).
 
-## Columns
+Two subsets:
+
+- **`default`** (`dau_data.csv`): the activity records.
+- **`states`** (`states.parquet`, 32,111,109 rows, 225 MB): every user on every day from 1 October 2020 to
+  31 October 2023 with their state, as built from the activity records by `prepare_states.r` in the code repository.
+  Building it takes a while and about 2.5 GB as CSV, so it is shared here ready-made.
+
+## `default`: activity records
 
 | column | content |
 |---|---|
@@ -36,5 +46,29 @@ monthly active users. Code: [github.com/prteek/probabilistic-model-of-user-journ
 | `date` | a day on which the user was active (2020-10-01 to 2023-10-31) |
 | `registration_date` | the day the user registered (2020-04-20 to 2023-10-31) |
 
-Days without a row for a user are days on which the user was inactive. The paper's code expands these records into
-one state per user per day (`prepare_states.r` in the code repository; about 2.5 GB as CSV).
+Days without a row for a user are days on which the user was inactive.
+
+## `states`: one state per user per day
+
+| column | content |
+|---|---|
+| `user_id` | anonymous user id (UUID) |
+| `date` | the day (2020-10-01 to 2023-10-31) |
+| `is_active` | whether the user was active that day (true on the 667,236 days in the activity records) |
+| `state` | the user's state that day (below) |
+| `registration_date` | the day the user registered |
+
+| state | meaning | rows |
+|---|---|---:|
+| `new` | active for the first time | 50,175 |
+| `current` | active today and in the past week | 585,129 |
+| `reactivated` | active today, last active in the past month but not the past week | 16,847 |
+| `resurrected` | active today, last active more than 30 days ago | 15,085 |
+| `at_risk_wau` | not active today, active in the past week | 604,449 |
+| `at_risk_mau` | active in the past month but not the past week | 1,683,057 |
+| `dormant` | inactive for at least 30 days | 29,156,367 |
+
+```python
+import pandas as pd
+states = pd.read_parquet("hf://datasets/prteek/user-journey-dau/states.parquet")
+```

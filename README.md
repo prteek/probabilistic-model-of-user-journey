@@ -25,9 +25,18 @@ references.bib, states.png, count_estimation.png, _wide-tables.lua
 ```bash
 Rscript -e 'renv::restore()'                       # once: install the R packages
 QUARTO_R=/opt/homebrew/bin/Rscript quarto render   # paper PDF from the frozen results
-Rscript prepare_states.r                           # states.csv, needed only to re-run the paper's code
-huggingface/publish.sh "message"                   # publish the dataset
+huggingface/publish.sh "message"                   # publish dau_data.csv and the card (CI does this on push)
 ```
+
+Re-running the paper's code needs `states.csv`, one state per user per day (~2.5 GB). Rather than building it with
+`Rscript prepare_states.r`, download the ready-made table from the dataset and convert it:
+
+```bash
+hf download prteek/user-journey-dau states.parquet --repo-type dataset --local-dir .
+duckdb -c "COPY (FROM 'states.parquet') TO 'states.csv'"
+```
+
+After changing `prepare_states.r`, rebuild `states.csv` and publish it with `huggingface/publish.sh "message" states`.
 
 Rendering reuses `_freeze/` until a code chunk changes. A push to `main` that changes `dau_data.csv` or the card
 publishes the dataset (`.github/workflows/publish-dataset.yml`, using the `HF_TOKEN` repository secret).
