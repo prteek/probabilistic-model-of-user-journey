@@ -40,15 +40,14 @@ The post builds the states from `dau_data.csv` on every render, so it needs noth
 
 ## Notes
 
-- **The write-up is a blog post in Python.** It replaced the alphaXiv paper (R, PDF build, frozen results) on
-  2026-10-27. The Python port reproduces the R results: the DuckDB states query gives exactly the 32,111,109 rows of
-  the `states.parquet` the old `prepare_states.r` built, and the transition matrix matches the paper to 7 decimal
-  places.
+- **The write-up is a blog post in Python.** It was ported from R on 2026-10-27 and reproduces the R results: the
+  DuckDB states query gives exactly the 32,111,109 rows of the `states.parquet` the old `prepare_states.r` built, and
+  the transition matrix matches the R one to 7 decimal places.
 - **The post tests the transitions, not sign-ups.** The transition matrix is estimated on 2022-05-01 to 2023-04-30
   and the chain is run over the last six months of data (2023-05-01 to 2023-10-31) from the actual state counts on
-  the last training day, adding the actual new users each day. The paper's negative binomial model of new users was
+  the last training day, adding the actual new users each day. The original negative binomial model of new users was
   dropped, so the error is down to the transitions alone.
-- **Expected counts, not whole users.** The forecast keeps the chain's expected counts; the paper rounded every
+- **Expected counts, not whole users.** The forecast keeps the chain's expected counts; the R version rounded every
   state down to whole users each day, which biased DAU low (by about 3 points over six months).
 - **The states table is not published.** It used to be on the dataset (225 MB) because the R code took a long
   time and 2.5 GB to build it; the DuckDB query rebuilds it in seconds, so it was removed on 2026-10-27.
