@@ -16,7 +16,8 @@ blog/                  Quarto write-up -> markdown for the Hugging Face article 
   index.qmd            the blog post; renders to probabilistic-model-of-user-journey.md, figures to assets/
   _hf-markdown.lua     writes inline maths as \\( ... \\) for the article editor
   states.png           the state diagram (hand-drawn); thumbnail.png, the article's cover image
-space/                 what-if Gradio app: app.py, Space card, requirements, baseline.json (from precompute.py)
+space/                 what-if Gradio app replaying the test period: app.py, Space card, requirements, baseline.json
+                       (from precompute.py)
 dataset/README.md      the dataset card
 publish.sh             upload the activity records and the dataset card, or the Space
 wait_for_space.py      wait until the Space runs its latest commit (used by CI)

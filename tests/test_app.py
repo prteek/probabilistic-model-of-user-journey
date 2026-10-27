@@ -7,36 +7,30 @@ spec = importlib.util.spec_from_file_location("app", Path(__file__).parents[1] /
 app = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(app)
 
-BASELINE_LEVELS = [app.baseline_percent(f, t) for f, t, *_ in app.LEVERS]
+BASELINE_LEVELS = [round(app.baseline_percent(f, t), 3) for f, t, *_ in app.LEVERS]  # what the sliders hold
+TEST_LEVELS = [round(app.baseline_percent(f, t, app.M_TEST), 3) for f, t, *_ in app.LEVERS]
 
 
 def test_baseline_matrix_rows_sum_to_one():
     assert np.allclose(app.M.sum(axis=1), 1)
 
 
+def test_projection_covers_the_test_period_only():
+    assert app.BASE.index.equals(app.ACTUAL.index)
+    assert str(app.BASE.index[0].date()) == app.BASELINE["test"][0]
+    assert str(app.BASE.index[-1].date()) == app.BASELINE["test"][1]
+
+
 def test_unchanged_sliders_give_the_baseline():
-    base = app.project(app.M, 25, 60)
-    scen = app.project(app.scenario_matrix(BASELINE_LEVELS), 25, 60)
-    assert np.allclose(base[["dau", "wau", "mau"]], scen[["dau", "wau", "mau"]])
+    scen = app.project(app.scenario_matrix(BASELINE_LEVELS))
+    assert np.allclose(app.BASE[["dau", "wau", "mau"]], scen[["dau", "wau", "mau"]], rtol=1e-4)
+    assert "Move a slider" in app.run(*BASELINE_LEVELS)[0]
 
 
-def test_better_retention_of_new_users_raises_active_users():
-    levels = list(BASELINE_LEVELS)
-    levels[0] = 70  # new -> current
-    base = app.project(app.M, 25, 180)
-    scen = app.project(app.scenario_matrix(levels), 25, 180)
-    assert (scen["dau"].iloc[-1] > base["dau"].iloc[-1]) and (scen["mau"].iloc[-1] > base["mau"].iloc[-1])
-
-
-def test_run_returns_a_summary_and_a_figure():
-    text, fig = app.run(25, 90, *BASELINE_LEVELS)
-    assert "Daily active users" in text and fig is not None
-    assert app.run(-1, 90, *BASELINE_LEVELS)[0].startswith("New users per day can't")
-
-
-def test_summary_says_when_nothing_has_changed():
-    rounded = [round(x, 3) for x in BASELINE_LEVELS]  # what the sliders hold
-    assert "Move a slider" in app.run(25, 90, *rounded)[0]
-    moved = list(rounded)
-    moved[2] += 5
-    assert "with the levers as set" in app.run(25, 90, *moved)[0]
+def test_test_period_transitions_move_the_scenario_towards_the_actual_numbers():
+    scen = app.project(app.scenario_matrix(TEST_LEVELS))
+    for col in ("dau", "mau"):
+        base_error = abs(app.BASE[col] - app.ACTUAL[col]).mean()
+        scen_error = abs(scen[col] - app.ACTUAL[col]).mean()
+        assert scen_error < base_error
+    assert "With the levers as set" in app.run(*TEST_LEVELS)[0]
