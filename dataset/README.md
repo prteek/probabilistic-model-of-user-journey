@@ -23,10 +23,10 @@ Each row is one day on which one user was active. The data is **simulated**, bas
 SaaS app; it contains no real users.
 
 It is the data behind the blog post
-[Forecasting Daily Active Users with a Markov Chain](https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey) on
+[How Well Does a Markov Chain Predict Active Users?](https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey) on
 Hugging Face, which places users in seven states each day (new, current, reactivated, resurrected, at-risk weekly active,
 at-risk monthly active, dormant) following Duolingo's growth model, estimates a Markov chain of transitions between
-them, and forecasts daily, weekly and monthly active users.
+them, and tests how well it predicts daily, weekly and monthly active users over six held-out months.
 Code: [github.com/prteek/probabilistic-model-of-user-journey](https://github.com/prteek/probabilistic-model-of-user-journey).
 
 ## Activity records (`dau_data.csv`)

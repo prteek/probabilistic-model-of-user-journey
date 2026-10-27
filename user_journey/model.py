@@ -1,8 +1,7 @@
-"""Transition matrix, new-user count model and the DAU / WAU / MAU forecast."""
+"""Transition matrix, daily state counts and the DAU / WAU / MAU forecast."""
 import duckdb
 import numpy as np
 import pandas as pd
-import statsmodels.formula.api as smf
 
 STATE_NAMES = ["at_risk_mau", "at_risk_wau", "current", "dormant", "new", "reactivated", "resurrected"]
 ACTIVE = ["new", "current", "reactivated", "resurrected"]
@@ -35,55 +34,49 @@ def transition_matrix(states: duckdb.DuckDBPyRelation, start, end) -> pd.DataFra
     return m.div(m.sum(axis=1), axis=0)
 
 
-def new_user_features(dates) -> pd.DataFrame:
-    dates = pd.to_datetime(pd.Series(dates))
-    return pd.DataFrame({
-        "date": dates.values,
-        "year": dates.dt.year.values,
-        "week_of_year": dates.dt.isocalendar().week.astype(int).values,
-        "month": dates.dt.strftime("%b").values,
-        "day_of_week": ((dates.dt.dayofweek + 1) % 7 + 1).values,  # 1 = Sunday ... 7 = Saturday
-    })
+def state_counts(states: duckdb.DuckDBPyRelation) -> pd.DataFrame:
+    """Number of users in each state on each day (rows: dates, columns: STATE_NAMES)."""
+    df = states.aggregate("date, state, count(*) as n").df()
+    counts = df.pivot_table(index="date", columns="state", values="n", fill_value=0)
+    counts.index = pd.to_datetime(counts.index)
+    return counts.reindex(columns=STATE_NAMES, fill_value=0).astype(float)
 
 
-NEW_USER_FORMULA = "new_user_count ~ year * bs(week_of_year, df=4) + C(month) + day_of_week"
-
-
-def fit_new_users(daily_new_users: pd.DataFrame):
-    """Negative binomial regression of daily new-user counts on year, a spline in week of year, month and weekday.
-
-    `daily_new_users` has columns date and new_user_count.
-    """
-    data = new_user_features(daily_new_users["date"]).assign(new_user_count=daily_new_users["new_user_count"].values)
-    return smf.negativebinomial(NEW_USER_FORMULA, data).fit(method="newton", maxiter=200, disp=False)
-
-
-def predict_new_users(fit, dates) -> pd.DataFrame:
-    """Expected new users per day with a 95% interval (on the log scale, transformed back)."""
-    data = new_user_features(dates)
-    # the formula rebuilds the design matrix with the fit's spline knots and month levels
-    eta = fit.get_prediction(data, which="linear").summary_frame(alpha=0.05)
-    return data[["date"]].assign(
-        predicted=np.exp(eta["predicted"].values),
-        lower=np.exp(eta["ci_lower"].values),
-        upper=np.exp(eta["ci_upper"].values),
-    )
-
-
-def forecast(m: pd.DataFrame, state0: pd.Series, new_users: pd.DataFrame) -> pd.DataFrame:
-    """Expected users in each state on every day of `new_users`, starting from the counts `state0` the day before.
-
-    Each day moves the previous day's counts through the transition matrix, then sets today's new users from
-    `new_users` (columns date and predicted). Counts are kept as whole users.
-    """
-    u = state0.reindex(STATE_NAMES, fill_value=0).to_numpy(float)
-    rows = []
-    for _, day in new_users.iterrows():
-        u = np.floor(m.to_numpy().T @ u)
-        u[STATE_NAMES.index("new")] = np.floor(day["predicted"])
-        rows.append(u)
-    out = pd.DataFrame(rows, columns=STATE_NAMES).assign(date=new_users["date"].values)
+def with_active_totals(counts: pd.DataFrame) -> pd.DataFrame:
+    """Add daily, weekly and monthly active users to a table of state counts."""
+    out = counts.copy()
     out["dau"] = out[ACTIVE].sum(axis=1)
     out["wau"] = out["dau"] + out["at_risk_wau"]
     out["mau"] = out["wau"] + out["at_risk_mau"]
     return out
+
+
+def with_transition(m: pd.DataFrame, state_from: str, state_to: str, p: float) -> pd.DataFrame:
+    """A copy of `m` with the probability of `state_from` -> `state_to` set to `p`.
+
+    The other transitions out of `state_from` are scaled in proportion, so the row still sums to 1: a campaign that
+    brings more at-risk users back takes them evenly from wherever else they would have gone.
+    """
+    out = m.copy()
+    row = out.loc[state_from].copy()
+    rest = 1 - row[state_to]
+    others = row.index != state_to
+    row[others] = row[others] * (1 - p) / rest if rest > 0 else (1 - p) / others.sum()
+    row[state_to] = p
+    out.loc[state_from] = row
+    return out
+
+
+def forecast(m: pd.DataFrame, state0: pd.Series, new_users: pd.Series) -> pd.DataFrame:
+    """Expected users in each state on every day of `new_users`, starting from the counts `state0` the day before.
+
+    Each day moves the previous day's counts through the transition matrix, then sets the day's new users from
+    `new_users` (indexed by date): new users come from outside the chain.
+    """
+    u = state0.reindex(STATE_NAMES, fill_value=0).to_numpy(float)
+    rows = []
+    for n_new in new_users.to_numpy(float):
+        u = m.to_numpy().T @ u
+        u[STATE_NAMES.index("new")] = n_new
+        rows.append(u)
+    return with_active_totals(pd.DataFrame(rows, columns=STATE_NAMES, index=new_users.index))

@@ -1,33 +1,38 @@
 # probabilistic-model-of-user-journey
 
-Forecasting an app's daily, weekly and monthly active users with a Markov chain over user states (new, current,
-reactivated, resurrected, at risk, dormant), following Duolingo's growth model. Written up as the blog post
-[Forecasting Daily Active Users with a Markov Chain](https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey) on Hugging Face.
+Predicting an app's daily, weekly and monthly active users with a Markov chain over user states (new, current,
+reactivated, resurrected, at risk, dormant), following Duolingo's growth model, tested on six held-out months.
+Written up as the blog post
+[How Well Does a Markov Chain Predict Active Users?](https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey) on Hugging Face.
 
-**Blog:** https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey · **Data:** https://huggingface.co/datasets/prteek/user-journey-dau
+**Blog:** https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey · **App:** https://huggingface.co/spaces/prteek/user-journey-what-if · **Data:** https://huggingface.co/datasets/prteek/user-journey-dau
 
 ```
 user_journey/          shared package
   states.py            one state per user per day from dau_data.csv (DuckDB); python -m user_journey.states
-  model.py             transition matrix, new-user count model (negative binomial), DAU / WAU / MAU forecast
+  model.py             transition matrix, daily state counts, DAU / WAU / MAU forecast
 dau_data.csv           simulated daily activity of 51,480 users (published as the dataset)
 blog/                  Quarto write-up -> markdown for the Hugging Face article editor
   index.qmd            the blog post; renders to probabilistic-model-of-user-journey.md, figures to assets/
   _hf-markdown.lua     writes inline maths as \\( ... \\) for the article editor
   states.png           the state diagram (hand-drawn); thumbnail.png, the article's cover image
+space/                 what-if Gradio app: app.py, Space card, requirements, baseline.json (from precompute.py)
 dataset/README.md      the dataset card
-publish.sh             upload the activity records and the dataset card
-tests/                 the state rules, transition matrix and forecast
+publish.sh             upload the activity records and the dataset card, or the Space
+wait_for_space.py      wait until the Space runs its latest commit (used by CI)
+tests/                 the state rules, transition matrix, forecast and app
 ```
 
 ## Common tasks
 
 ```bash
-uv sync                                                      # package + blog + dev groups
+uv sync                                                      # package + app + blog + dev groups
 uv run pytest -q
 
 QUARTO_PYTHON=.venv/bin/python quarto render blog/index.qmd  # blog markdown + assets/ figures (~25 s)
 uv run python -m user_journey.states                         # states.parquet (32 million rows, seconds)
+uv run python space/precompute.py                            # space/baseline.json (the app's data)
+uv run python space/app.py                                   # app on http://127.0.0.1:7860
 ```
 
 The post builds the states from `dau_data.csv` on every render, so it needs nothing beyond this repository.
@@ -36,13 +41,17 @@ The post builds the states from `dau_data.csv` on every render, so it needs noth
 
 - **The write-up is a blog post in Python.** It replaced the alphaXiv paper (R, PDF build, frozen results) on
   2026-10-27. The Python port reproduces the R results: the DuckDB states query gives exactly the 32,111,109 rows of
-  the `states.parquet` the old `prepare_states.r` built, the transition matrix matches the paper to
-  7 decimal places, and the negative binomial new-user model gives the same fit (theta 9.31) and predictions as
-  `MASS::glm.nb`; its 95% intervals are about 1% wider, since statsmodels estimates the dispersion jointly.
+  the `states.parquet` the old `prepare_states.r` built, and the transition matrix matches the paper to 7 decimal
+  places.
+- **The post tests the transitions, not sign-ups.** The transition matrix is estimated on 2022-05-01 to 2023-04-30
+  and the chain is run over the last six months of data (2023-05-01 to 2023-10-31) from the actual state counts on
+  the last training day, adding the actual new users each day. The paper's negative binomial model of new users was
+  dropped, so the error is down to the transitions alone.
+- **Expected counts, not whole users.** The forecast keeps the chain's expected counts; the paper rounded every
+  state down to whole users each day, which biased DAU low (by about 3 points over six months).
 - **The states table is not published.** It used to be on the dataset (225 MB) because the R code took a long
   time and 2.5 GB to build it; the DuckDB query rebuilds it in seconds, so it was removed on 2026-10-27.
-- **The new-user forecast is the weak link.** The `year * bs(week_of_year)` interaction extrapolates the seasonal
-  shape into 2024, so the January spike becomes a broad hump; the post says so and treats the forecast as a scenario.
 
-A push to `main` that changes `dau_data.csv`, the card or `publish.sh` publishes the dataset
-(`.github/workflows/publish-dataset.yml`, using the `HF_TOKEN` repository secret).
+Pushes to `main` publish to Hugging Face with the `HF_TOKEN` repository secret: `publish-dataset.yml` when
+`dau_data.csv`, the card or `publish.sh` change, and `publish-space.yml` when the app or `user_journey/model.py`
+change (it runs the tests, uploads, and waits until the Space runs the new commit).

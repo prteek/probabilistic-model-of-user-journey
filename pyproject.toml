@@ -1,17 +1,22 @@
 [project]
 name = "probabilistic-model-of-user-journey"
 version = "0.1.0"
-description = "Forecasting daily, weekly and monthly active users with a Markov chain over user states: blog post and dataset"
+description = "Predicting daily, weekly and monthly active users with a Markov chain over user states: blog post, app and dataset"
 requires-python = ">=3.12"
-# the shared package (user_journey): user states, transition matrix, new-user model and forecast
+# the shared package (user_journey): user states, transition matrix and forecast
 dependencies = [
     "duckdb>=1.1",
     "numpy>=2.0",
     "pandas>=2.2",
-    "statsmodels>=0.14",
 ]
 
 [dependency-groups]
+# the Gradio Space (space/)
+app = [
+    "gradio>=6.30.0",
+    "huggingface-hub>=0.30",
+    "plotly>=5.24",
+]
 # rendering the Quarto blog post (blog/)
 blog = [
     "jupyter>=1.1",
@@ -22,7 +27,7 @@ blog = [
 dev = ["pytest>=8"]
 
 [tool.uv]
-default-groups = ["blog", "dev"]
+default-groups = ["app", "blog", "dev"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]

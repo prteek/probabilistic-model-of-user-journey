@@ -20,11 +20,10 @@ from pathlib import Path
 
 import duckdb
 import matplotlib.pyplot as plt
-import numpy as np
 import pandas as pd
 from IPython.display import Markdown, display
 
-from user_journey.model import STATE_NAMES, fit_new_users, forecast, predict_new_users, transition_matrix
+from user_journey.model import STATE_NAMES, forecast, state_counts, transition_matrix, with_active_totals
 from user_journey.states import DAU_DATA, states
 
 plt.style.use("seaborn-v0_8-whitegrid")
@@ -45,52 +44,50 @@ def num(x, digits=0):
     return f"{x:,.{digits}f}"
 
 
+def pct(x, digits=1):
+    return f"{100 * x:+.{digits}f}%"
+
+
 dau_data = pd.read_csv(DAU_DATA, parse_dates=["date", "registration_date"])
-daily_active = dau_data.groupby("date").size().rename("dau")
-daily_new = (
-    dau_data[dau_data["date"] == dau_data["registration_date"]]
-    .groupby("date").size().rename("new_user_count").reset_index()
-)
 
 con = duckdb.connect()
 con.execute("SET enable_progress_bar = false")  # keep DuckDB's progress bars out of the post
 user_states = states(con)
+actual = with_active_totals(state_counts(user_states))
 
-# the transition matrix is estimated on the last year of data; the forecast runs on from the day after
-TRAIN_START, TRAIN_END = "2022-11-01", "2023-10-31"
-FORECAST_START, FORECAST_END = "2023-11-01", "2024-12-01"
+# training: the transition matrix is estimated on the year before the test period
+# test: the last six months of data; the chain starts from the state counts on the last training day
+TRAIN_START, TRAIN_END = "2022-05-01", "2023-04-30"
+TEST_START, TEST_END = "2023-05-01", "2023-10-31"
+
+m = transition_matrix(user_states, TRAIN_START, TRAIN_END)
+m_test = transition_matrix(user_states, TEST_START, TEST_END)
+state0 = actual.loc[TRAIN_END, STATE_NAMES]
+test = actual.loc[TEST_START:TEST_END]
+predicted = forecast(m, state0, test["new"])  # actual new users each day, from outside the chain
+error = (predicted - test) / test  # relative error per day
+# the same test with the matrix estimated on the test period itself: what is left is not drift
+oracle = forecast(m_test, state0, test["new"])
+oracle_error = (oracle - test) / test
+monthly_abs = abs(error[["dau", "wau", "mau"]].groupby(error.index.to_period("M")).mean())
 ```
 
-# Forecasting Daily Active Users with a Markov Chain
+# How Well Does a Markov Chain Predict Active Users?
 
-## A Duolingo-Style Model of User States, from Activity Logs to a DAU Forecast
+## Testing a Duolingo-Style Model of User States on Six Months of Held-Out Data
 
-How many people will use your app next month? Duolingo [described](https://blog.duolingo.com/growth-model-duolingo) how they answer that: every user is in one of a handful of states each day (new, current, at risk, dormant, ...), users move between states with stable probabilities, and daily, weekly and monthly active users are just sums over states. This post applies that model to the activity logs of a simulated app and uses it to forecast a year ahead.
+Duolingo [described](https://blog.duolingo.com/growth-model-duolingo) a simple way to think about active users: every user is in one of a handful of states each day (new, current, at risk, dormant, ...), users move between states with stable probabilities, and daily, weekly and monthly active users are just sums over states. The probabilities form a transition matrix, and pushing today's state counts through it says where the user base is heading.
 
-The appeal is that the model has handles a product team can reason about. A reminder campaign that brings back some *at-risk* users changes one number in a transition matrix; a marketing push changes the expected number of new users. Everything is open:
+This post builds that model from the activity logs of a simulated app and tests the part that is about user behaviour: **the transitions**. The transition matrix is estimated on a year of data, and then used to predict the last six months, which the model never saw. New users are not part of the test: they come from outside the chain, so the actual number of sign-ups each day is fed in. Any error is then down to how users move between states. Everything is open:
 
 - 📊 **Data:** [datasets/prteek/user-journey-dau](https://huggingface.co/datasets/prteek/user-journey-dau): the activity records
 - 💻 **Code:** [github.com/prteek/probabilistic-model-of-user-journey](https://github.com/prteek/probabilistic-model-of-user-journey)
 
-```{python}
-m = transition_matrix(user_states, TRAIN_START, TRAIN_END)
-fit = fit_new_users(daily_new)
-new_users_ahead = predict_new_users(fit, pd.date_range(FORECAST_START, FORECAST_END))
-state0 = (
-    user_states.filter(f"date = DATE '{TRAIN_END}'")
-    .aggregate("state, count(*) as n").df()
-    .set_index("state")["n"]
-)
-ahead = forecast(m, state0, new_users_ahead)
-ahead_fewer_new = forecast(m, state0, new_users_ahead.assign(predicted=lambda d: 0.8 * d["predicted"]))
-last_year = daily_active.loc["2022-11-01":"2023-10-31"]
-```
-
 ## TL;DR
 
-- Give every user one of **seven states** each day, estimate the **transition matrix** between states from a year of history, and push today's state counts through it day by day, adding the expected new users.
-- In this app, `{python} f"{m.loc['current', 'current']:.0%}"` of today's current users are active again tomorrow, and a dormant user has only a `{python} f"{m.loc['dormant', 'resurrected']:.2%}"` chance of coming back on a given day.
-- The forecast is driven mostly by new users. With the new-user model as fitted, DAU over the next year averages `{python} num(ahead['dau'].mean())`, against `{python} num(last_year.mean())` in the last year of data; with 20% fewer new users it averages `{python} num(ahead_fewer_new['dau'].mean())`.
+- Give every user one of **seven states** each day, estimate the **transition matrix** between states from a year of history, and push the state counts through it day by day, adding each day's new users.
+- Tested on six held-out months, the chain predicts weekly active users within `{python} f"{abs(error['wau']).mean():.1%}"` on average and daily active users within `{python} f"{abs(error['dau']).mean():.1%}"`, with the error growing over time: in the last month DAU is `{python} pct(-error.loc['2023-10', 'dau'].mean(), 0).lstrip('+')` too low and MAU `{python} pct(error.loc['2023-10', 'mau'].mean(), 0).lstrip('+')` too high.
+- The drift has a clear cause: users stayed more engaged in the test period than in the training year. Next-day retention of new users went from `{python} f"{m.loc['new', 'current']:.0%}"` to `{python} f"{m_test.loc['new', 'current']:.0%}"`. A fixed transition matrix can't see that; comparing matrices over time can.
 
 ## User states
 
@@ -110,13 +107,13 @@ The arrows are the quantities a product team watches: the share of new users who
 
 ## The model
 
-Let $M$ be the transition matrix: $m_{ij}$ is the probability that a user in state $i$ today is in state $j$ tomorrow, and each row sums to 1. If $u_t$ holds the number of users in each state on day $t$, then, assuming the transition probabilities don't change over time,
+Let $M$ be the transition matrix: $m_{ij}$ is the probability that a user in state $i$ today is in state $j$ tomorrow, and each row sums to 1. If $u_t$ holds the expected number of users in each state on day $t$, then, assuming the transition probabilities don't change over time,
 
 $$
 u_{t+1} = M^\top u_t ,
 $$
 
-except that the number of new users on each day comes from outside the chain and has to be forecast separately. Daily, weekly and monthly active users are then sums over states:
+except that new users don't come from any state: they join from outside the chain, so the number of new users on each day is an input. Daily, weekly and monthly active users are sums over states:
 
 $$
 \begin{aligned}
@@ -125,8 +122,6 @@ $$
 \text{MAU}_t &= \text{WAU}_t + \#\text{at\_risk\_mau}_t
 \end{aligned}
 $$
-
-So the recipe is: forecast new users per day, assign a state to every user on every day of history, estimate $M$, take the state counts on the last day of data, and iterate.
 
 ## The data
 
@@ -138,49 +133,17 @@ display(Markdown(dau_data.head(5).assign(
 ).to_markdown(index=False)))
 ```
 
-It covers `{python} num(dau_data['user_id'].nunique())` users from `{python} f"{dau_data['date'].min():%-d %B %Y}"` to `{python} f"{dau_data['date'].max():%-d %B %Y}"`, `{python} num(len(dau_data))` active user-days in all. Daily active users grow through 2021 and then hover with a strong seasonal pattern:
+It covers `{python} num(dau_data['user_id'].nunique())` users from `{python} f"{dau_data['date'].min():%-d %B %Y}"` to `{python} f"{dau_data['date'].max():%-d %B %Y}"`, `{python} num(len(dau_data))` active user-days in all. The transition matrix is estimated on the year from `{python} f"{pd.Timestamp(TRAIN_START):%-d %B %Y}"` to `{python} f"{pd.Timestamp(TRAIN_END):%-d %B %Y}"`, and the last six months are held out for testing:
 
 ```{python}
 fig, ax = plt.subplots(figsize=(10, 3.6))
-ax.plot(daily_active.index, daily_active.values, color="black", lw=0.8)
+ax.plot(actual.index, actual["dau"], color="black", lw=0.8)
+ax.axvspan(pd.Timestamp(TRAIN_START), pd.Timestamp(TRAIN_END), color="tab:blue", alpha=0.08, label="training year")
+ax.axvspan(pd.Timestamp(TEST_START), pd.Timestamp(TEST_END), color="tab:red", alpha=0.08, label="test (held out)")
 ax.set_ylabel("daily active users")
-figure(fig, "dau", "Daily active users in the data")
+ax.legend(fontsize=8, loc="upper left")
+figure(fig, "dau", "Daily active users, with the training year and the held-out test period")
 ```
-
-## Forecasting new users
-
-New users enter the chain from outside, so they need their own forecast. It doesn't need to be very accurate: in practice the number of new users is also something a team plans for, so it is as much an input as a prediction.
-
-Daily new-user counts are modelled with a **negative binomial regression**: counts are overdispersed relative to a Poisson (there are spikes, especially at the start of each year), and the negative binomial allows for that. The predictors are the year, a spline in the week of the year (interacting with the year, so the seasonal shape can change), the month and the day of the week:
-
-```python
-smf.negativebinomial(
-    "new_user_count ~ year * bs(week_of_year, df=4) + C(month) + day_of_week", data
-).fit(method="newton")
-```
-
-```{python}
-fitted = predict_new_users(fit, daily_new["date"])
-fig, axes = plt.subplots(1, 2, figsize=(12, 3.8), gridspec_kw={"width_ratios": [2, 1]})
-for ax, start in zip(axes, ["2020-10-01", "2023-07-01"]):
-    end = FORECAST_END if start < "2023" else "2023-12-31"
-    obs = daily_new[daily_new["date"] >= start]
-    fit_part = fitted[fitted["date"] >= start]
-    ahead_part = new_users_ahead[new_users_ahead["date"] <= end]
-    ax.scatter(obs["date"], obs["new_user_count"], s=3, color="0.4", alpha=0.6, label="new users")
-    ax.plot(fit_part["date"], fit_part["predicted"], color="tab:brown", lw=1, label="fitted")
-    ax.plot(ahead_part["date"], ahead_part["predicted"], color="tab:red", lw=1, label="forecast")
-    if start > "2023":
-        for part in (fit_part, ahead_part):
-            ax.fill_between(part["date"], part["lower"], part["upper"], color="black", alpha=0.15, lw=0)
-    ax.tick_params(axis="x", labelrotation=30)
-axes[0].set_ylabel("new users per day")
-axes[0].legend(fontsize=8, loc="upper left")
-axes[1].set_title("Last months of data and the start of the forecast, with 95% intervals", fontsize=9)
-figure(fig, "new-users", "Daily new users: data, fitted values and forecast")
-```
-
-The model fits the history well, including the spike in new users at the start of each year. The forecast is less convincing: with the seasonal shape allowed to change from year to year, the model carries that trend into 2024, so new users start climbing in November and the January spike becomes a broad hump, followed by a summer lower than anything in the data. That is a reason to treat the new-user forecast as a scenario rather than a prediction.
 
 ## From activity records to states
 
@@ -209,7 +172,7 @@ display(Markdown(example.to_markdown(index=False)))
 
 ## The transition matrix
 
-The transition matrix is estimated by counting, over the last year of data, how often users move from each state to each other state from one day to the next, and dividing by the number of moves out of each state:
+The transition matrix is estimated by counting, over the training year, how often users move from each state to each other state from one day to the next, and dividing by the number of moves out of each state:
 
 ```sql
 select state as state_from, lead(state) over (partition by user_id order by date) as state_to
@@ -225,37 +188,80 @@ It reads sensibly:
 - **Current users mostly stay current.** `{python} f"{m.loc['current', 'current']:.1%}"` are active again the next day; the rest become *at risk*.
 - **New users are fragile.** Only `{python} f"{m.loc['new', 'current']:.1%}"` are active on their second day.
 - **Nobody becomes new.** The *new* column is all zeros: new users only enter from outside the chain.
-- **Dormant users rarely return.** `{python} f"{m.loc['dormant', 'dormant']:.2%}"` of dormant users are still dormant the next day. On the last day of data, `{python} num(state0['dormant'])` of the `{python} num(state0.sum())` users are dormant, so even a small improvement there would be worth a resurrection campaign.
+- **Dormant users rarely return.** `{python} f"{m.loc['dormant', 'dormant']:.2%}"` of dormant users are still dormant the next day. On the last training day, `{python} num(state0['dormant'])` of the `{python} num(state0.sum())` users are dormant, so even a small improvement there would be worth a resurrection campaign.
 
-## Forecasting DAU
+## Testing on six held-out months
 
-Starting from the state counts on `{python} f"{pd.Timestamp(TRAIN_END):%-d %B %Y}"`, each day of the forecast moves yesterday's counts through $M$ and adds that day's forecast new users:
+The test starts from the actual state counts on `{python} f"{pd.Timestamp(TRAIN_END):%-d %B %Y}"`, the last training day. Each day moves the previous day's expected counts through $M$ and adds that day's actual new users:
 
 ```python
-for _, day in new_users.iterrows():
-    u = np.floor(m.to_numpy().T @ u)
-    u[STATE_NAMES.index("new")] = np.floor(day["predicted"])
+for n_new in new_users:
+    u = M.T @ u
+    u[STATE_NAMES.index("new")] = n_new
+```
+
+Feeding in the actual new users keeps the test about transitions. Almost everyone who joins the chain in the test period does so as a new user; the actual state counts, computed from the states table, are the benchmark.
+
+```{python}
+fig, axes = plt.subplots(1, 3, figsize=(13, 3.6))
+history = actual.loc["2023-02-01":TRAIN_END]
+for ax, col, label in zip(axes, ["dau", "wau", "mau"], ["daily", "weekly", "monthly"]):
+    ax.plot(history.index, history[col], color="0.6", lw=0.8, label="training data")
+    ax.plot(test.index, test[col], color="black", lw=0.8, label="actual")
+    ax.plot(predicted.index, predicted[col], color="tab:red", lw=1.5, label="predicted")
+    ax.axvline(pd.Timestamp(TEST_START), color="0.4", lw=0.8, ls=":")
+    ax.set_title(f"{label} active users", fontsize=10)
+    ax.tick_params(axis="x", labelrotation=30, labelsize=8)
+axes[0].legend(fontsize=8, loc="lower left")
+figure(fig, "test", "Daily, weekly and monthly active users in the test period: actual and predicted")
 ```
 
 ```{python}
-fig, ax = plt.subplots(figsize=(10, 3.8))
-ax.plot(daily_active.index, daily_active.values, color="black", lw=0.8, label="data")
-ax.plot(ahead["date"], ahead["dau"], color="tab:red", lw=1.2, label="forecast")
-ax.plot(ahead_fewer_new["date"], ahead_fewer_new["dau"], color="tab:red", lw=1.2, ls=":",
-        label="forecast with 20% fewer new users")
-ax.set_ylabel("daily active users")
-ax.legend(fontsize=8, loc="upper left")
-figure(fig, "dau-forecast", "Daily active users: data and forecast")
+monthly = error[["dau", "wau", "mau"]].groupby(error.index.to_period("M")).mean()
+monthly.index = [f"{p:%b %Y}" for p in monthly.index]
+table = monthly.map(pct).rename(columns={"dau": "DAU", "wau": "WAU", "mau": "MAU"})
+table.loc["all six months (mean absolute)"] = abs(error[["dau", "wau", "mau"]]).mean().map(lambda x: f"{100 * x:.1f}%").values
+display(Markdown(table.rename_axis("mean error, predicted vs actual").to_markdown(colalign=["left", "right", "right", "right"])))
 ```
 
-Most daily actives are *current* users (`{python} num(state0['current'])` of the `{python} num(state0[['new', 'current', 'reactivated', 'resurrected']].sum())` active on the last day of data), topped up every day by new users, so the forecast follows the new-user forecast closely. It peaks at `{python} num(ahead['dau'].max())` in January 2024, above anything in the data (`{python} num(daily_active.max())` at most), and falls to `{python} num(ahead['dau'].min())` in the summer. With 20% fewer new users (dotted line), the January peak (`{python} num(ahead_fewer_new['dau'].max())`) is in line with previous years, but the summer drops even lower. Either way, the shape and level of the forecast come from that one input.
+For a model with seven states and no knowledge of the calendar, this does well at first. In the first month every measure is within `{python} f"{monthly_abs.iloc[0].max():.0%}"`, and weekly active users stay within `{python} f"{monthly_abs['wau'].max():.0%}"` in every month. The chain reproduces little of DAU's weekday swing (it tracks expected counts, and its small wiggles come from the daily new users fed in), but it follows the level.
+
+The errors do grow, though, and in a consistent direction: DAU drifts low and MAU drifts high. The chain moves too many users out of activity and into the *at risk* states. By the last day of the test:
+
+```{python}
+end = pd.DataFrame({"actual": test.iloc[-1][STATE_NAMES], "predicted": predicted.iloc[-1][STATE_NAMES]})
+end["difference"] = end["predicted"] - end["actual"]
+display(Markdown(end.rename_axis("state on " + f"{pd.Timestamp(TEST_END):%-d %B %Y}").to_markdown(floatfmt=",.0f")))
+```
+
+## What changed: comparing transition matrices
+
+The model's one assumption is that the transition matrix doesn't change. Estimating it again on the test period shows whether that held:
+
+```{python}
+pairs = [
+    ("new", "current"), ("current", "current"), ("at_risk_wau", "current"),
+    ("reactivated", "current"), ("at_risk_mau", "reactivated"), ("at_risk_mau", "dormant"),
+]
+drift = pd.DataFrame(
+    [(f"{a} → {b}", m.loc[a, b], m_test.loc[a, b]) for a, b in pairs],
+    columns=["transition", "training year", "test period"],
+)
+drift["change"] = (drift["test period"] - drift["training year"]).map(lambda x: f"{100 * x:+.2f} pp")
+display(Markdown(drift.to_markdown(index=False, floatfmt=".2%")))
+```
+
+It didn't, quite. Users were more engaged in the test period than in the training year, most of all new users: `{python} f"{m_test.loc['new', 'current']:.0%}"` came back on their second day, against `{python} f"{m.loc['new', 'current']:.0%}"` before. At-risk users also returned more often. Each change is a point or less on most transitions, but they compound every day, and over six months they add up to the drift above. A product change, a seasonal effect or a different mix of new users could all be behind it; the matrix doesn't say which, only where to look.
+
+To check that the drift explains the errors, the test can be re-run with the matrix estimated on the test period itself, as if the change had been known in advance. The mean absolute error of MAU falls from `{python} f"{abs(error['mau']).mean():.1%}"` to `{python} f"{abs(oracle_error['mau']).mean():.1%}"`, and the surplus of *at_risk_mau* users on the last day from `{python} num(predicted.iloc[-1]['at_risk_mau'] - test.iloc[-1]['at_risk_mau'])` to `{python} num(oracle.iloc[-1]['at_risk_mau'] - test.iloc[-1]['at_risk_mau'])`. What is left is the model's own limits. DAU stays around `{python} f"{abs(oracle_error['dau']).mean():.0%}"` off on a typical day, because the chain predicts a smooth expected level and real DAU swings with the day of the week. And the chain is memoryless: a real user goes dormant after exactly 30 inactive days, while the chain gives every *at_risk_mau* user the same small chance of going dormant each day, whatever their history.
 
 ## Lessons learned
 
+- **Test the transitions on their own.** Feeding in the actual new users separates the two things a user forecast depends on: how many people join, and how they behave once they have. Here the behaviour part predicts weekly active users within `{python} f"{abs(error['wau']).mean():.1%}"` on average over six months.
 - **States make retention concrete.** A transition matrix turns vague questions ("are we keeping users?") into specific rates a team can measure and target: next-day retention of new users, of current users, of users at risk.
-- **New users drive the forecast.** The chain itself is stable; the shape and the level of the forecast come almost entirely from the new-user forecast. Treat it as a planning input and look at scenarios rather than a single prediction.
-- **Campaigns are edits to the matrix.** A reminder that brings back some *at-risk* users raises the at-risk → current probability; a resurrection campaign raises dormant → resurrected. Re-running the forecast with the edited matrix shows the effect on DAU.
-- **Stationarity is an assumption.** The matrix is estimated on one year and held fixed for the next. Re-estimating it on rolling windows shows whether user behaviour, or the product, is changing.
+- **Drift shows up in the matrix before it shows up in the totals.** Comparing transition matrices over time pins a forecast error on specific transitions. Here, better retention, of new users above all, explains most of it: with the test period's own matrix, the MAU error falls from `{python} f"{abs(error['mau']).mean():.1%}"` to `{python} f"{abs(oracle_error['mau']).mean():.1%}"`.
+- **Re-estimate regularly.** A matrix estimated on rolling windows tracks changes in behaviour; one fixed for six months slowly falls behind.
+- **Campaigns are edits to the matrix.** A reminder that brings back some *at-risk* users raises the at-risk → current probability; a resurrection campaign raises dormant → resurrected. Re-running the chain with the edited matrix shows the effect on active users.
 - **Let the database do the expansion.** Turning activity logs into one row per user per day is the expensive step. A window function in DuckDB does it in seconds, where row-by-row code in memory struggles.
 
 ## Reproduce it
@@ -264,14 +270,17 @@ The [dataset](https://huggingface.co/datasets/prteek/user-journey-dau) has the a
 
 ```python
 import duckdb
-from user_journey.model import transition_matrix
+from user_journey.model import forecast, state_counts, transition_matrix, with_active_totals
 from user_journey.states import states
 
-m = transition_matrix(states(duckdb.connect()), "2022-11-01", "2023-10-31")
+s = states(duckdb.connect())
+actual = with_active_totals(state_counts(s))
+m = transition_matrix(s, "2022-05-01", "2023-04-30")
+test = actual.loc["2023-05-01":]
+predicted = forecast(m, actual.loc["2023-04-30", m.index], test["new"])
 ```
 
 ## References
 
 - Gustafson, E. (2024). *Meaningful metrics: How data sharpened the focus of product teams*. Duolingo blog. <https://blog.duolingo.com/growth-model-duolingo>
-- Seabold, S. & Perktold, J. (2010). statsmodels: Econometric and statistical modeling with Python. *Proceedings of the 9th Python in Science Conference*.
 - Raasveldt, M. & Mühleisen, H. (2019). DuckDB: an Embeddable Analytical Database. *SIGMOD*.
