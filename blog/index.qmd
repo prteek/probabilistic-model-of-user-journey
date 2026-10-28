@@ -80,6 +80,7 @@ Duolingo [described](https://blog.duolingo.com/growth-model-duolingo) a simple w
 
 This post builds that model from the activity logs of a simulated app and tests the part that is about user behaviour: **the transitions**. The transition matrix is estimated on a year of data, and then used to predict the last six months, which the model never saw. New users are not part of the test: they come from outside the chain, so the actual number of sign-ups each day is fed in. Any error is then down to how users move between states. Everything is open:
 
+- 🎮 **Try it:** [Space: user-journey-what-if](https://huggingface.co/spaces/prteek/user-journey-what-if): replay the test months with different retention and see what happens to active users
 - 📊 **Data:** [datasets/prteek/user-journey-dau](https://huggingface.co/datasets/prteek/user-journey-dau): the activity records
 - 💻 **Code:** [github.com/prteek/probabilistic-model-of-user-journey](https://github.com/prteek/probabilistic-model-of-user-journey)
 
@@ -279,6 +280,8 @@ m = transition_matrix(s, "2022-05-01", "2023-04-30")
 test = actual.loc["2023-05-01":]
 predicted = forecast(m, actual.loc["2023-04-30", m.index], test["new"])
 ```
+
+Or open the [Space](https://huggingface.co/spaces/prteek/user-journey-what-if): it replays the six test months with the sliders on the transitions a product team can act on, such as at-risk → current, and shows what that would have done to DAU, WAU and MAU next to what really happened.
 
 ## References
 
