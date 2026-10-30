@@ -5,6 +5,9 @@ reactivated, resurrected, at risk, dormant), following Duolingo's growth model, 
 Written up as the blog post
 [How Well Does a Markov Chain Predict Active Users?](https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey) on Hugging Face.
 
+It builds on Vladimir Kukushkin's [Modeling DAU with Markov chain](https://towardsdatascience.com/modeling-dau-with-markov-chain-640ea4fddeb4/) (Towards Data Science), which
+introduced this approach and the simulated dataset used here (`dau_data.csv`); see [Credits](#credits).
+
 **Blog:** https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey · **App:** https://huggingface.co/spaces/prteek/user-journey-what-if · **Data:** https://huggingface.co/datasets/prteek/user-journey-dau
 
 ```
@@ -51,6 +54,18 @@ The post builds the states from `dau_data.csv` on every render, so it needs noth
   state down to whole users each day, which biased DAU low (by about 3 points over six months).
 - **The states table is not published.** It used to be on the dataset (225 MB) because the R code took a long
   time and 2.5 GB to build it; the DuckDB query rebuilds it in seconds, so it was removed on 2026-10-27.
+
+## Credits
+
+The method and the data come from Vladimir Kukushkin,
+[Modeling DAU with Markov chain](https://towardsdatascience.com/modeling-dau-with-markov-chain-640ea4fddeb4/), Towards Data Science (2024),
+also on his blog at [wowone.github.io](https://wowone.github.io/posts/003_dau_prediction/dau_prediction.html).
+`dau_data.csv` is the simulated dataset published with that article (51,480 users, based on historical data of a SaaS
+app), redistributed here unchanged. This project re-implements the states and the transition matrix, and adds the
+held-out test of the transitions, the drift analysis and the what-if app. The state definitions follow Duolingo's
+growth model ([Gustafson, 2024](https://blog.duolingo.com/growth-model-duolingo)).
+
+## Publishing
 
 Pushes to `main` publish to Hugging Face with the `HF_TOKEN` repository secret: `publish-dataset.yml` when
 `dau_data.csv`, the card or `publish.sh` change, and `publish-space.yml` when the app or `user_journey/model.py`

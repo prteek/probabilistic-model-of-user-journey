@@ -22,6 +22,11 @@ configs:
 Each row is one day on which one user was active. The data is **simulated**, based on historical activity data of a
 SaaS app; it contains no real users.
 
+**Source and credit:** this dataset was created and published by Vladimir Kukushkin with the article
+[Modeling DAU with Markov chain](https://towardsdatascience.com/modeling-dau-with-markov-chain-640ea4fddeb4/) (Towards Data Science, 2024),
+which introduced the Markov chain model of user states that this work builds on. It is redistributed here unchanged.
+Please cite that article if you use the data.
+
 It is the data behind the blog post
 [How Well Does a Markov Chain Predict Active Users?](https://huggingface.co/blog/prteek/probabilistic-model-of-user-journey) on
 Hugging Face, which places users in seven states each day (new, current, reactivated, resurrected, at-risk weekly active,

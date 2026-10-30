@@ -78,7 +78,7 @@ monthly_abs = abs(error[["dau", "wau", "mau"]].groupby(error.index.to_period("M"
 
 Duolingo [described](https://blog.duolingo.com/growth-model-duolingo) a simple way to think about active users: every user is in one of a handful of states each day (new, current, at risk, dormant, ...), users move between states with stable probabilities, and daily, weekly and monthly active users are just sums over states. The probabilities form a transition matrix, and pushing today's state counts through it says where the user base is heading.
 
-This post builds that model from the activity logs of a simulated app and tests the part that is about user behaviour: **the transitions**. The transition matrix is estimated on a year of data, and then used to predict the last six months, which the model never saw. New users are not part of the test: they come from outside the chain, so the actual number of sign-ups each day is fed in. Any error is then down to how users move between states. Everything is open:
+Vladimir Kukushkin turned that idea into a forecast in [Modeling DAU with Markov chain](https://towardsdatascience.com/modeling-dau-with-markov-chain-640ea4fddeb4/) on Towards Data Science, and published a simulated dataset with it. This post builds on his work: it uses the same model and his dataset, the activity logs of a simulated app, and tests the part that is about user behaviour: **the transitions**. The transition matrix is estimated on a year of data, and then used to predict the last six months, which the model never saw. New users are not part of the test: they come from outside the chain, so the actual number of sign-ups each day is fed in. Any error is then down to how users move between states. Everything is open:
 
 - 🎮 **Try it:** [Space: user-journey-what-if](https://huggingface.co/spaces/prteek/user-journey-what-if): replay the test months with different retention and see what happens to active users
 - 📊 **Data:** [datasets/prteek/user-journey-dau](https://huggingface.co/datasets/prteek/user-journey-dau): the activity records
@@ -285,5 +285,6 @@ Or open the [Space](https://huggingface.co/spaces/prteek/user-journey-what-if): 
 
 ## References
 
+- Kukushkin, V. (2024). *Modeling DAU with Markov chain*. Towards Data Science. <https://towardsdatascience.com/modeling-dau-with-markov-chain-640ea4fddeb4/>. The method this post builds on, and the source of the dataset.
 - Gustafson, E. (2024). *Meaningful metrics: How data sharpened the focus of product teams*. Duolingo blog. <https://blog.duolingo.com/growth-model-duolingo>
 - Raasveldt, M. & Mühleisen, H. (2019). DuckDB: an Embeddable Analytical Database. *SIGMOD*.

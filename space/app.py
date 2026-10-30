@@ -141,7 +141,9 @@ with gr.Blocks(title="User journey what-if") as demo:
     plot = gr.Plot(show_label=False)
     gr.Markdown(
         "The data is a simulated activity log of 51,480 users based on a real SaaS app: "
-        "[prteek/user-journey-dau](https://huggingface.co/datasets/prteek/user-journey-dau)."
+        "[prteek/user-journey-dau](https://huggingface.co/datasets/prteek/user-journey-dau), from Vladimir "
+        "Kukushkin's [Modeling DAU with Markov chain](https://towardsdatascience.com/modeling-dau-with-markov-chain-640ea4fddeb4/) "
+        "(Towards Data Science), the work this builds on."
     )
 
     reset.click(lambda: [round(baseline_percent(f, t), 3) for f, t, *_ in LEVERS], None, sliders)
